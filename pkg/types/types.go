@@ -54,9 +54,39 @@ type UpdateRequest struct {
 	ExpressionAttributeValues map[string]*AttributeValue `json:"ExpressionAttributeValues,omitempty"`
 }
 
+// UpdateItemResponse represents a DynamoDB UpdateItem response.
+
+type UpdateItemResponse struct {
+	Attributes map[string]*AttributeValue `json:"Attributes"`
+}
+
+// GetItemResponse represents a DynamoDB GetItem response.
+
+type GetItemResponse struct {
+	Item map[string]*AttributeValue `json:"Item"`
+}
+
 // QueryRequest represents a DynamoDB Query request.
 type QueryRequest struct {
 	TableName                 string                     `json:"TableName"`
 	KeyConditionExpression    string                     `json:"KeyConditionExpression"`
 	ExpressionAttributeValues map[string]*AttributeValue `json:"ExpressionAttributeValues,omitempty"`
+}
+
+// QueryResponse represents a DynamoDB Query response.
+
+type QueryResponse struct {
+	Items []map[string]*AttributeValue `json:"Items"`
+}
+
+// TableDescription represents the properties of a table.
+
+type TableDescription struct {
+	TableName string `json:"TableName"`
+}
+
+// CreateTableResponse represents a DynamoDB CreateTable response.
+
+type CreateTableResponse struct {
+	TableDescription TableDescription `json:"TableDescription"`
 }
