@@ -7,7 +7,10 @@ import (
 
 // Storage is an interface for a storage engine.
 type Storage interface {
-	CreateTable(req *types.CreateTableRequest) error
+	CreateTable(req *types.CreateTableRequest) (*types.CreateTableResponse, error)
+	DeleteTable(req *types.DeleteTableRequest) (*types.DeleteTableResponse, error)
+	DescribeTable(req *types.DescribeTableRequest) (*types.DescribeTableResponse, error)
+	ListTables(req *types.ListTablesRequest) (*types.ListTablesResponse, error)
 	Put(req *types.PutRequest) error
 	Get(req *types.GetRequest) (map[string]*expression.AttributeValue, error)
 	Delete(req *types.DeleteRequest) error

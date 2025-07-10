@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"zagreb/pkg/expression"
 	"zagreb/pkg/storage/bbolt"
 	"zagreb/pkg/types"
@@ -33,7 +36,8 @@ func TestBBoltStorage_CreateTable(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(req); err != nil {
+	_, err = s.CreateTable(req)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,7 +65,8 @@ func TestBBoltStorage_PutGet(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 	putReq := &types.PutRequest{
@@ -126,7 +131,8 @@ func TestBBoltStorage_PutGet_CompositeKey(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,7 +202,8 @@ func TestBBoltStorage_Delete(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,7 +270,8 @@ func TestBBoltStorage_Update(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,7 +292,10 @@ func TestBBoltStorage_Update(t *testing.T) {
 		Key: map[string]*expression.AttributeValue{
 			"id": {S: stringPtr("123")},
 		},
-		UpdateExpression: "SET name = new-name",
+		UpdateExpression: "SET name = :newName",
+		ExpressionAttributeValues: map[string]*expression.AttributeValue{
+			":newName": {S: stringPtr("new-name")},
+		},
 	}
 
 	updatedItem, err := s.Update(updateReq)
@@ -320,7 +331,8 @@ func TestBBoltStorage_Query(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -377,7 +389,8 @@ func TestBBoltStorage_Query_Validation(t *testing.T) {
 		},
 	}
 
-	if err := s.CreateTable(createReq); err != nil {
+	_, err = s.CreateTable(createReq)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -440,6 +453,138 @@ func TestBBoltStorage_Query_Validation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeleteTable(t *testing.T) {
+	dbPath := "test_delete_table.db"
+	s, err := bbolt.NewBBoltStorage(dbPath)
+	require.NoError(t, err)
+	defer os.Remove(dbPath)
+
+	// Create a table
+	createTableReq := &types.CreateTableRequest{
+		TableName: "TestTable",
+		KeySchema: []*types.KeySchemaElement{
+			{AttributeName: "ID", KeyType: "HASH"},
+		},
+		AttributeDefinitions: []*types.AttributeDefinition{
+			{AttributeName: "ID", AttributeType: "S"},
+		},
+	}
+	_, err = s.CreateTable(createTableReq)
+	require.NoError(t, err)
+
+	// Verify table exists
+	describeTableReq := &types.DescribeTableRequest{TableName: "TestTable"}
+	_, err = s.DescribeTable(describeTableReq)
+	require.NoError(t, err)
+
+	// Delete the table
+	deleteTableReq := &types.DeleteTableRequest{TableName: "TestTable"}
+	deleteResp, err := s.DeleteTable(deleteTableReq)
+	require.NoError(t, err)
+	assert.Equal(t, "TestTable", deleteResp.TableDescription.TableName)
+
+	// Verify table no longer exists
+	_, err = s.DescribeTable(describeTableReq)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "table not found")
+
+	// Try to delete a non-existent table
+	deleteTableReq = &types.DeleteTableRequest{TableName: "NonExistentTable"}
+	_, err = s.DeleteTable(deleteTableReq)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "table not found")
+}
+
+func TestDescribeTable(t *testing.T) {
+	dbPath := "test_describe_table.db"
+	s, err := bbolt.NewBBoltStorage(dbPath)
+	require.NoError(t, err)
+	defer os.Remove(dbPath)
+
+	// Create a table
+	createTableReq := &types.CreateTableRequest{
+		TableName: "MyTable",
+		KeySchema: []*types.KeySchemaElement{
+			{AttributeName: "PK", KeyType: "HASH"},
+			{AttributeName: "SK", KeyType: "RANGE"},
+		},
+		AttributeDefinitions: []*types.AttributeDefinition{
+			{AttributeName: "PK", AttributeType: "S"},
+			{AttributeName: "SK", AttributeType: "N"},
+		},
+	}
+	_, err = s.CreateTable(createTableReq)
+	require.NoError(t, err)
+
+	// Describe the table
+	describeTableReq := &types.DescribeTableRequest{TableName: "MyTable"}
+	resp, err := s.DescribeTable(describeTableReq)
+	require.NoError(t, err)
+	assert.Equal(t, "MyTable", resp.Table.TableName)
+	assert.Len(t, resp.Table.KeySchema, 2)
+	assert.Len(t, resp.Table.AttributeDefinitions, 2)
+	assert.Equal(t, "PK", resp.Table.KeySchema[0].AttributeName)
+	assert.Equal(t, "HASH", resp.Table.KeySchema[0].KeyType)
+	assert.Equal(t, "SK", resp.Table.KeySchema[1].AttributeName)
+	assert.Equal(t, "RANGE", resp.Table.KeySchema[1].KeyType)
+	assert.Equal(t, "PK", resp.Table.AttributeDefinitions[0].AttributeName)
+	assert.Equal(t, "S", resp.Table.AttributeDefinitions[0].AttributeType)
+	assert.Equal(t, "SK", resp.Table.AttributeDefinitions[1].AttributeName)
+	assert.Equal(t, "N", resp.Table.AttributeDefinitions[1].AttributeType)
+
+	// Describe a non-existent table
+	describeTableReq = &types.DescribeTableRequest{TableName: "NonExistentTable"}
+	_, err = s.DescribeTable(describeTableReq)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "table not found")
+}
+
+func TestListTables(t *testing.T) {
+	dbPath := "test_list_tables.db"
+	s, err := bbolt.NewBBoltStorage(dbPath)
+	require.NoError(t, err)
+	defer os.Remove(dbPath)
+
+	// Initially, no tables
+	listTablesReq := &types.ListTablesRequest{}
+	resp, err := s.ListTables(listTablesReq)
+	require.NoError(t, err)
+	assert.Empty(t, resp.TableNames)
+
+	// Create a few tables
+	table1Req := &types.CreateTableRequest{TableName: "Table1"}
+	_, err = s.CreateTable(table1Req)
+	require.NoError(t, err)
+
+	table2Req := &types.CreateTableRequest{TableName: "Table2"}
+	_, err = s.CreateTable(table2Req)
+	require.NoError(t, err)
+
+	table3Req := &types.CreateTableRequest{TableName: "Table3"}
+	_, err = s.CreateTable(table3Req)
+	require.NoError(t, err)
+
+	// List tables
+	resp, err = s.ListTables(listTablesReq)
+	require.NoError(t, err)
+	assert.Len(t, resp.TableNames, 3)
+	assert.Contains(t, resp.TableNames, "Table1")
+	assert.Contains(t, resp.TableNames, "Table2")
+	assert.Contains(t, resp.TableNames, "Table3")
+
+	// Delete one table and list again
+	deleteTableReq := &types.DeleteTableRequest{TableName: "Table2"}
+	_, err = s.DeleteTable(deleteTableReq)
+	require.NoError(t, err)
+
+	resp, err = s.ListTables(listTablesReq)
+	require.NoError(t, err)
+	assert.Len(t, resp.TableNames, 2)
+	assert.Contains(t, resp.TableNames, "Table1")
+	assert.NotContains(t, resp.TableNames, "Table2")
+	assert.Contains(t, resp.TableNames, "Table3")
 }
 
 func stringPtr(s string) *string {

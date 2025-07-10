@@ -15,10 +15,9 @@ import (
 type Node struct {
 	ID   string
 	Addr string
-	// Add any other node-specific information here, e.g., client for communication
 }
 
-// Router implements the Storage interface and routes requests to appropriate nodes.
+// NodeClientFactory creates a new node client.
 type NodeClientFactory interface {
 	NewNodeClient(addr string) storage.Storage
 }
@@ -29,6 +28,7 @@ func (f *defaultNodeClientFactory) NewNodeClient(addr string) storage.Storage {
 	return nodeapi.NewNodeClient(addr)
 }
 
+// Router implements the Storage interface and routes requests to appropriate nodes.
 type Router struct {
 	consistent        *consistent.Consistent
 	nodes             map[string]Node // Map node ID to Node struct
@@ -55,11 +55,8 @@ func (r *Router) AddNode(node Node) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Add to consistent hash ring
 	r.consistent.Add(node.ID)
 	r.nodes[node.ID] = node
-
-	// Create and set client for the node
 	client := r.nodeClientFactory.NewNodeClient(node.Addr)
 	r.nodeClients[node.ID] = client
 }
@@ -69,7 +66,6 @@ func (r *Router) RemoveNode(nodeID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Remove from consistent hash ring
 	r.consistent.Remove(nodeID)
 	delete(r.nodes, nodeID)
 	delete(r.nodeClients, nodeID)
@@ -97,7 +93,6 @@ func (r *Router) GetNode(key string) (Node, error) {
 	return node, nil
 }
 
-// getClientForNode retrieves the storage client for a given node.
 func (r *Router) getClientForNode(node Node) (storage.Storage, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -109,21 +104,131 @@ func (r *Router) getClientForNode(node Node) (storage.Storage, error) {
 }
 
 // CreateTable routes the CreateTable request to the appropriate node.
-func (r *Router) CreateTable(req *types.CreateTableRequest) error {
+func (r *Router) CreateTable(req *types.CreateTableRequest) (*types.CreateTableResponse, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.nodes) == 0 {
+		return nil, fmt.Errorf("no nodes in the ring to create table")
+	}
+
+	var firstResp *types.CreateTableResponse
+	var firstErr error
+
+	for _, node := range r.nodes {
+		client, err := r.getClientForNode(node)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to get client for node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		resp, err := client.CreateTable(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to create table on node %s: %w", node.ID, err)
+			}
+		} else if firstResp == nil {
+			firstResp = resp
+		}
+	}
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if firstResp == nil {
+		return nil, fmt.Errorf("no successful responses from nodes for CreateTable")
+	}
+	return firstResp, nil
+}
+
+// DeleteTable routes the DeleteTable request to the appropriate node.
+func (r *Router) DeleteTable(req *types.DeleteTableRequest) (*types.DeleteTableResponse, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.nodes) == 0 {
+		return nil, fmt.Errorf("no nodes in the ring to delete table")
+	}
+
+	var firstResp *types.DeleteTableResponse
+	var firstErr error
+
+	for _, node := range r.nodes {
+		client, err := r.getClientForNode(node)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to get client for node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		resp, err := client.DeleteTable(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to delete table on node %s: %w", node.ID, err)
+			}
+		} else if firstResp == nil {
+			firstResp = resp
+		}
+	}
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if firstResp == nil {
+		return nil, fmt.Errorf("no successful responses from nodes for DeleteTable")
+	}
+	return firstResp, nil
+}
+
+// DescribeTable routes the DescribeTable request to the appropriate node.
+func (r *Router) DescribeTable(req *types.DescribeTableRequest) (*types.DescribeTableResponse, error) {
 	node, err := r.GetNode(req.TableName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	client, err := r.getClientForNode(node)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return client.CreateTable(req)
+	return client.DescribeTable(req)
+}
+
+// ListTables routes the ListTables request to all nodes and aggregates the results.
+func (r *Router) ListTables(req *types.ListTablesRequest) (*types.ListTablesResponse, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.nodes) == 0 {
+		return nil, fmt.Errorf("no nodes in the ring")
+	}
+
+	allTableNames := make(map[string]struct{})
+	for _, node := range r.nodes {
+		client, err := r.getClientForNode(node)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.ListTables(req)
+		if err != nil {
+			return nil, err
+		}
+		for _, tableName := range resp.TableNames {
+			allTableNames[tableName] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(allTableNames))
+	for tableName := range allTableNames {
+		result = append(result, tableName)
+	}
+
+	return &types.ListTablesResponse{TableNames: result}, nil
 }
 
 // Put routes the Put request to the appropriate node.
 func (r *Router) Put(req *types.PutRequest) error {
-	node, err := r.GetNode(req.TableName + "#" + *req.Item[req.TableName].M[req.TableName].S) // Assuming HashKey is TableName.HashKey
+	node, err := r.GetNode(req.TableName)
 	if err != nil {
 		return err
 	}
@@ -136,7 +241,7 @@ func (r *Router) Put(req *types.PutRequest) error {
 
 // Get routes the Get request to the appropriate node.
 func (r *Router) Get(req *types.GetRequest) (map[string]*expression.AttributeValue, error) {
-	node, err := r.GetNode(req.TableName + "#" + *req.Key[req.TableName].S) // Assuming HashKey is TableName.HashKey
+	node, err := r.GetNode(req.TableName)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +254,7 @@ func (r *Router) Get(req *types.GetRequest) (map[string]*expression.AttributeVal
 
 // Delete routes the Delete request to the appropriate node.
 func (r *Router) Delete(req *types.DeleteRequest) error {
-	node, err := r.GetNode(req.TableName + "#" + *req.Key[req.TableName].S) // Assuming HashKey is TableName.HashKey
+	node, err := r.GetNode(req.TableName)
 	if err != nil {
 		return err
 	}
@@ -162,7 +267,7 @@ func (r *Router) Delete(req *types.DeleteRequest) error {
 
 // Update routes the Update request to the appropriate node.
 func (r *Router) Update(req *types.UpdateRequest) (map[string]*expression.AttributeValue, error) {
-	node, err := r.GetNode(req.TableName + "#" + *req.Key[req.TableName].S) // Assuming HashKey is TableName.HashKey
+	node, err := r.GetNode(req.TableName)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +280,7 @@ func (r *Router) Update(req *types.UpdateRequest) (map[string]*expression.Attrib
 
 // Query routes the Query request to the appropriate node.
 func (r *Router) Query(req *types.QueryRequest) ([]map[string]*expression.AttributeValue, error) {
-	node, err := r.GetNode(req.TableName + "#" + req.KeyConditionExpression) // Assuming HashKey is TableName.HashKey
+	node, err := r.GetNode(req.TableName)
 	if err != nil {
 		return nil, err
 	}

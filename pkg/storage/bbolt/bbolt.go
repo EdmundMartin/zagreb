@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	
 	bolt "go.etcd.io/bbolt"
 	"zagreb/pkg/expression"
 	"zagreb/pkg/types"
@@ -43,8 +42,8 @@ func NewBBoltStorage(path string) (*BBoltStorage, error) {
 }
 
 // CreateTable creates a new table.
-func (s *BBoltStorage) CreateTable(req *types.CreateTableRequest) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+func (s *BBoltStorage) CreateTable(req *types.CreateTableRequest) (*types.CreateTableResponse, error) {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		// Create the table bucket.
 		_, err := tx.CreateBucketIfNotExists([]byte(req.TableName))
 		if err != nil {
@@ -61,6 +60,95 @@ func (s *BBoltStorage) CreateTable(req *types.CreateTableRequest) error {
 
 		return mb.Put(key, val)
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.CreateTableResponse{
+		TableDescription: types.TableDescription{
+			TableName:            req.TableName,
+			KeySchema:            req.KeySchema,
+			AttributeDefinitions: req.AttributeDefinitions,
+		},
+	}, nil
+}
+
+// DeleteTable deletes a table.
+func (s *BBoltStorage) DeleteTable(req *types.DeleteTableRequest) (*types.DeleteTableResponse, error) {
+	var tableDef *types.CreateTableRequest
+
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		// Get table definition
+		var err error
+		tableDef, err = s.getTableDef(tx, req.TableName)
+		if err != nil {
+			return err
+		}
+
+		// Delete the table bucket.
+		if err := tx.DeleteBucket([]byte(req.TableName)); err != nil {
+			return err
+		}
+
+		// Delete the table definition.
+		mb := tx.Bucket([]byte(metadataBucket))
+		return mb.Delete([]byte(req.TableName))
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.DeleteTableResponse{
+		TableDescription: types.TableDescription{
+			TableName:            tableDef.TableName,
+			KeySchema:            tableDef.KeySchema,
+			AttributeDefinitions: tableDef.AttributeDefinitions,
+		},
+	}, nil
+}
+
+// DescribeTable describes a table.
+func (s *BBoltStorage) DescribeTable(req *types.DescribeTableRequest) (*types.DescribeTableResponse, error) {
+	var tableDef *types.CreateTableRequest
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		var err error
+		tableDef, err = s.getTableDef(tx, req.TableName)
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.DescribeTableResponse{
+		Table: types.TableDescription{
+			TableName:            tableDef.TableName,
+			KeySchema:            tableDef.KeySchema,
+			AttributeDefinitions: tableDef.AttributeDefinitions,
+		},
+	}, nil
+}
+
+// ListTables lists all tables.
+func (s *BBoltStorage) ListTables(req *types.ListTablesRequest) (*types.ListTablesResponse, error) {
+	var tableNames []string
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		mb := tx.Bucket([]byte(metadataBucket))
+		return mb.ForEach(func(k, v []byte) error {
+			tableNames = append(tableNames, string(k))
+			return nil
+		})
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.ListTablesResponse{TableNames: tableNames}, nil
 }
 
 // Put adds an item to a table.

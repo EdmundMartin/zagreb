@@ -77,21 +77,57 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "CreateTable":
-		var createTableReq types.CreateTableRequest
-		if err := json.Unmarshal(body, &createTableReq); err != nil {
+		var req types.CreateTableRequest
+		if err := json.Unmarshal(body, &req); err != nil {
 			s.writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := s.storage.CreateTable(&createTableReq); err != nil {
+		resp, err := s.storage.CreateTable(&req)
+		if err != nil {
 			s.writeError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.CreateTableResponse{
-			TableDescription: types.TableDescription{
-				TableName: createTableReq.TableName,
-			},
-		})
+		json.NewEncoder(w).Encode(resp)
+	case "DeleteTable":
+		var req types.DeleteTableRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			s.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := s.storage.DeleteTable(&req)
+		if err != nil {
+			s.writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	case "DescribeTable":
+		var req types.DescribeTableRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			s.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := s.storage.DescribeTable(&req)
+		if err != nil {
+			s.writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	case "ListTables":
+		var req types.ListTablesRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			s.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := s.storage.ListTables(&req)
+		if err != nil {
+			s.writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
 	case "PutItem":
 		var putReq types.PutRequest
 		if err := json.Unmarshal(body, &putReq); err != nil {

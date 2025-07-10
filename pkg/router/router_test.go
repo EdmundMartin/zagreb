@@ -16,9 +16,24 @@ type MockStorage struct {
 	mock.Mock
 }
 
-func (m *MockStorage) CreateTable(req *types.CreateTableRequest) error {
+func (m *MockStorage) CreateTable(req *types.CreateTableRequest) (*types.CreateTableResponse, error) {
 	args := m.Called(req)
-	return args.Error(0)
+	return args.Get(0).(*types.CreateTableResponse), args.Error(1)
+}
+
+func (m *MockStorage) DeleteTable(req *types.DeleteTableRequest) (*types.DeleteTableResponse, error) {
+	args := m.Called(req)
+	return args.Get(0).(*types.DeleteTableResponse), args.Error(1)
+}
+
+func (m *MockStorage) DescribeTable(req *types.DescribeTableRequest) (*types.DescribeTableResponse, error) {
+	args := m.Called(req)
+	return args.Get(0).(*types.DescribeTableResponse), args.Error(1)
+}
+
+func (m *MockStorage) ListTables(req *types.ListTablesRequest) (*types.ListTablesResponse, error) {
+	args := m.Called(req)
+	return args.Get(0).(*types.ListTablesResponse), args.Error(1)
 }
 
 func (m *MockStorage) Put(req *types.PutRequest) error {
@@ -127,7 +142,153 @@ func TestGetClientForNode(t *testing.T) {
 	assert.Contains(t, err.Error(), "no client found for node node2")
 }
 
-func TestCreateTable(t *testing.T) {
+func TestCreateTable_Success(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.CreateTableRequest{TableName: "test_table"}
+	expectedResp := &types.CreateTableResponse{
+		TableDescription: types.TableDescription{
+			TableName: "test_table",
+		},
+	}
+
+	// Success case: CreateTable should be called on all nodes
+	mockClient1.On("CreateTable", req).Return(expectedResp, nil).Once()
+	mockClient2.On("CreateTable", req).Return(expectedResp, nil).Once()
+	resp, err := r.CreateTable(req)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedResp, resp)
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+}
+
+func TestCreateTable_ErrorFromOneClient(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.CreateTableRequest{TableName: "test_table"}
+	expectedResp := &types.CreateTableResponse{
+		TableDescription: types.TableDescription{
+			TableName: "test_table",
+		},
+	}
+
+	// Error case: One client returns an error
+	mockClient1.On("CreateTable", req).Return(expectedResp, nil).Once()
+	mockClient2.On("CreateTable", req).Return(&types.CreateTableResponse{}, errors.New("client 2 error")).Once()
+	_, err := r.CreateTable(req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client 2 error")
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+}
+
+func TestCreateTable_NoNodes(t *testing.T) {
+	emptyRouter := NewRouter(nil)
+	req := &types.CreateTableRequest{TableName: "test_table"}
+	_, err := emptyRouter.CreateTable(req)
+	assert.ErrorContains(t, err, "no nodes in the ring to create table")
+}
+
+func TestDeleteTable_Success(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.DeleteTableRequest{TableName: "test_table"}
+	expectedResp := &types.DeleteTableResponse{
+		TableDescription: types.TableDescription{
+			TableName: "test_table",
+		},
+	}
+
+	// Success case: DeleteTable should be called on all nodes
+	mockClient1.On("DeleteTable", req).Return(expectedResp, nil).Once()
+	mockClient2.On("DeleteTable", req).Return(expectedResp, nil).Once()
+	resp, err := r.DeleteTable(req)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedResp, resp)
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+}
+
+func TestDeleteTable_ErrorFromOneClient(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.DeleteTableRequest{TableName: "test_table"}
+	expectedResp := &types.DeleteTableResponse{
+		TableDescription: types.TableDescription{
+			TableName: "test_table",
+		},
+	}
+
+	// Error case: One client returns an error
+	mockClient1.On("DeleteTable", req).Return(expectedResp, nil).Once()
+	mockClient2.On("DeleteTable", req).Return(&types.DeleteTableResponse{}, errors.New("client 2 error")).Once()
+	_, err := r.DeleteTable(req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client 2 error")
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+}
+
+func TestDeleteTable_NoNodes(t *testing.T) {
+	emptyRouter := NewRouter(nil)
+	req := &types.DeleteTableRequest{TableName: "test_table"}
+	_, err := emptyRouter.DeleteTable(req)
+	assert.ErrorContains(t, err, "no nodes in the ring to delete table")
+}
+
+func TestDescribeTable(t *testing.T) {
 	mockFactory := new(MockNodeClientFactory)
 	r := NewRouter(mockFactory)
 	mockClient := new(MockStorage)
@@ -136,26 +297,100 @@ func TestCreateTable(t *testing.T) {
 	node1 := Node{ID: "node1", Addr: "localhost:8001"}
 	r.AddNode(node1)
 
-	req := &types.CreateTableRequest{TableName: "test_table"}
+	req := &types.DescribeTableRequest{TableName: "test_table"}
+	expectedResp := &types.DescribeTableResponse{
+		Table: types.TableDescription{
+			TableName: "test_table",
+		},
+	}
 
 	// Success case
-	mockClient.On("CreateTable", req).Return(nil).Once()
-	err := r.CreateTable(req)
+	mockClient.On("DescribeTable", req).Return(expectedResp, nil).Once()
+	resp, err := r.DescribeTable(req)
 	assert.NoError(t, err)
+	assert.Equal(t, expectedResp, resp)
 	mockClient.AssertExpectations(t)
 
 	// Error case from client
-	mockClient.On("CreateTable", req).Return(errors.New("client error")).Once()
-	err = r.CreateTable(req)
+	mockClient.On("DescribeTable", req).Return(&types.DescribeTableResponse{}, errors.New("client error")).Once()
+	_, err = r.DescribeTable(req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "client error")
 	mockClient.AssertExpectations(t)
 
 	// Error case no nodes
 	emptyRouter := NewRouter(nil)
-	err = emptyRouter.CreateTable(req)
+	_, err = emptyRouter.DescribeTable(req)
 	assert.ErrorContains(t, err, "no nodes in the ring")
 }
+
+func TestListTables_Success(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.ListTablesRequest{}
+	expectedResp1 := &types.ListTablesResponse{TableNames: []string{"table1", "table2"}}
+	expectedResp2 := &types.ListTablesResponse{TableNames: []string{"table2", "table3"}}
+
+	// Success case
+	mockClient1.On("ListTables", req).Return(expectedResp1, nil).Once()
+	mockClient2.On("ListTables", req).Return(expectedResp2, nil).Once()
+	resp, err := r.ListTables(req)
+	assert.NoError(t, err)
+	assert.Len(t, resp.TableNames, 3)
+	assert.Contains(t, resp.TableNames, "table1")
+	assert.Contains(t, resp.TableNames, "table2")
+	assert.Contains(t, resp.TableNames, "table3")
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+}
+
+func TestListTables_ErrorFromClient(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.ListTablesRequest{}
+
+	// Error case from one client
+	mockClient1.On("ListTables", req).Return(&types.ListTablesResponse{}, errors.New("client 1 error")).Once()
+	_, err := r.ListTables(req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client 1 error")
+	mockClient1.AssertExpectations(t)
+	// mockClient2.AssertExpectations(t) // This assertion is removed
+}
+
+func TestListTables_NoNodes(t *testing.T) {
+	emptyRouter := NewRouter(nil)
+	req := &types.ListTablesRequest{}
+	_, err := emptyRouter.ListTables(req)
+	assert.ErrorContains(t, err, "no nodes in the ring")
+}
+
 
 func TestPut(t *testing.T) {
 	mockFactory := new(MockNodeClientFactory)
@@ -166,15 +401,10 @@ func TestPut(t *testing.T) {
 	node1 := Node{ID: "node1", Addr: "localhost:8001"}
 	r.AddNode(node1)
 
-	hashKeyVal := "item1"
 	req := &types.PutRequest{
 		TableName: "test_table",
 		Item: map[string]*expression.AttributeValue{
-			"test_table": {
-				M: map[string]*expression.AttributeValue{
-					"test_table": {S: &hashKeyVal},
-				},
-			},
+			"id": {S: stringPtr("123")},
 		},
 	}
 
@@ -201,14 +431,13 @@ func TestGet(t *testing.T) {
 	node1 := Node{ID: "node1", Addr: "localhost:8001"}
 	r.AddNode(node1)
 
-	hashKeyVal := "item1"
 	req := &types.GetRequest{
 		TableName: "test_table",
 		Key: map[string]*expression.AttributeValue{
-			"test_table": {S: &hashKeyVal},
+			"id": {S: stringPtr("123")},
 		},
 	}
-	expectedResult := map[string]*expression.AttributeValue{"data": {S: &hashKeyVal}}
+	expectedResult := map[string]*expression.AttributeValue{"data": {S: stringPtr("item1")}}
 
 	// Success case
 	mockClient.On("Get", req).Return(expectedResult, nil).Once()
@@ -234,11 +463,10 @@ func TestDelete(t *testing.T) {
 	node1 := Node{ID: "node1", Addr: "localhost:8001"}
 	r.AddNode(node1)
 
-	hashKeyVal := "item1"
 	req := &types.DeleteRequest{
 		TableName: "test_table",
 		Key: map[string]*expression.AttributeValue{
-			"test_table": {S: &hashKeyVal},
+			"id": {S: stringPtr("123")},
 		},
 	}
 
@@ -265,14 +493,13 @@ func TestUpdate(t *testing.T) {
 	node1 := Node{ID: "node1", Addr: "localhost:8001"}
 	r.AddNode(node1)
 
-	hashKeyVal := "item1"
 	req := &types.UpdateRequest{
 		TableName: "test_table",
 		Key: map[string]*expression.AttributeValue{
-			"test_table": {S: &hashKeyVal},
+			"id": {S: stringPtr("123")},
 		},
 	}
-	expectedResult := map[string]*expression.AttributeValue{"updated_data": {S: &hashKeyVal}}
+	expectedResult := map[string]*expression.AttributeValue{"updated_data": {S: stringPtr("item1")}}
 
 	// Success case
 	mockClient.On("Update", req).Return(expectedResult, nil).Once()
@@ -302,7 +529,7 @@ func TestQuery(t *testing.T) {
 		TableName:            "test_table",
 		KeyConditionExpression: "HashKey = :val",
 	}
-	expectedResult := []map[string]*expression.AttributeValue{{"query_data": {S: new(string)}}}
+	expectedResult := []map[string]*expression.AttributeValue{{"query_data": {S: stringPtr("item1")}}}
 
 	// Success case
 	mockClient.On("Query", req).Return(expectedResult, nil).Once()
@@ -319,4 +546,6 @@ func TestQuery(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
-
+func stringPtr(s string) *string {
+	return &s
+}

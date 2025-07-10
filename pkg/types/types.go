@@ -2,8 +2,6 @@ package types
 
 import (
 	"zagreb/pkg/expression"
-
-	
 )
 
 // AttributeValue represents a DynamoDB attribute value.
@@ -68,8 +66,8 @@ type GetItemResponse struct {
 
 // QueryRequest represents a DynamoDB Query request.
 type QueryRequest struct {
-	TableName                 string                     `json:"TableName"`
-	KeyConditionExpression    string                     `json:"KeyConditionExpression"`
+	TableName              string                     `json:"TableName"`
+	KeyConditionExpression string                     `json:"KeyConditionExpression"`
 	ExpressionAttributeValues map[string]*AttributeValue `json:"ExpressionAttributeValues,omitempty"`
 }
 
@@ -80,13 +78,43 @@ type QueryResponse struct {
 }
 
 // TableDescription represents the properties of a table.
-
 type TableDescription struct {
-	TableName string `json:"TableName"`
+	TableName            string                 `json:"TableName"`
+	KeySchema            []*KeySchemaElement    `json:"KeySchema"`
+	AttributeDefinitions []*AttributeDefinition `json:"AttributeDefinitions"`
 }
 
 // CreateTableResponse represents a DynamoDB CreateTable response.
-
 type CreateTableResponse struct {
 	TableDescription TableDescription `json:"TableDescription"`
+}
+
+// DeleteTableRequest represents a DynamoDB DeleteTable request.
+type DeleteTableRequest struct {
+	TableName string `json:"TableName"`
+}
+
+// DeleteTableResponse represents a DynamoDB DeleteTable response.
+type DeleteTableResponse struct {
+	TableDescription TableDescription `json:"TableDescription"`
+}
+
+// DescribeTableRequest represents a DynamoDB DescribeTable request.
+type DescribeTableRequest struct {
+	TableName string `json:"TableName"`
+}
+
+// DescribeTableResponse represents a DynamoDB DescribeTable response.
+type DescribeTableResponse struct {
+	Table TableDescription `json:"Table"`
+}
+
+// ListTablesRequest represents a DynamoDB ListTables request.
+type ListTablesRequest struct {
+	Limit int `json:"Limit"`
+}
+
+// ListTablesResponse represents a DynamoDB ListTables response.
+type ListTablesResponse struct {
+	TableNames []string `json:"TableNames"`
 }

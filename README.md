@@ -1,13 +1,23 @@
 # Zagreb: A DynamoDB-Compatible Database (WIP)
 
-Zagreb is an experimental, lightweight, and DynamoDB-compatible database implemented in Go, utilizing `bbolt` for its underlying storage. This project aims to provide a simplified, local-first database solution that mimics the core API patterns of AWS DynamoDB.
+Zagreb is an experimental, lightweight, and DynamoDB-compatible database implemented in Go. It features a distributed architecture with a central router and multiple storage nodes, utilizing `bbolt` for its underlying storage. This project aims to provide a simplified, local-first database solution that mimics the core API patterns of AWS DynamoDB.
 
 **Disclaimer:** This project is currently a Work In Progress (WIP) and is intended for learning and experimentation. It is not production-ready.
+
+## Architecture
+
+Zagreb operates on a distributed model consisting of two primary components:
+
+-   **Router:** The central entry point for all client requests. It maintains a registry of available storage nodes and is responsible for routing incoming DynamoDB API calls to the appropriate node.
+-   **Node:** A storage unit responsible for handling a subset of the data. Each node runs its own instance of the DynamoDB-compatible API and manages a local `bbolt` database file. Nodes register themselves with the router upon startup.
+
+This design allows for horizontal scaling by adding more nodes to the cluster.
 
 ## Features
 
 - **DynamoDB-like API:** Implements a subset of DynamoDB's API operations.
-- **Key-Value Storage:** Leverages `bbolt` for efficient embedded key-value storage.
+- **Distributed Design:** A central router manages and forwards requests to one or more storage nodes.
+- **Key-Value Storage:** Leverages `bbolt` for efficient embedded key-value storage on each node.
 - **Basic Operations:
     - `CreateTable`: Define table schemas with primary keys (HASH and RANGE).
     - `PutItem`: Store items in tables.
@@ -38,23 +48,30 @@ Zagreb is an experimental, lightweight, and DynamoDB-compatible database impleme
 
 ### Running the Application
 
-The `main.go` file now starts an HTTP API server that listens on port `8000`.
+To run Zagreb, you must start the router and at least one node.
 
-```bash
-go run cmd/main.go
-```
+1.  **Start the Router:
+    Open a terminal and run the following command. The router listens on port `8081`.
+    ```bash
+    go run cmd/router/main.go
+    ```
 
-This will create a `my.db` file in the project root directory and start the API server.
+2.  **Start a Node:
+    Open a second terminal and run the following command. This will start a node that listens on port `8001` and registers itself with the router.
+    ```bash
+    go run cmd/node/main.go
+    ```
+    The node will create a `node-1.db` file in the project root to store its data. You can run multiple nodes, but you will need to modify the `nodeID` and `nodeAddr` constants in `cmd/node/main.go` to avoid conflicts.
 
 ## HTTP API Usage
 
-The API mimics DynamoDB's HTTP API. You can interact with it using `curl` or any HTTP client. All requests should be `POST` requests to the root path (`/`) and include the `X-Amz-Target` header to specify the operation.
+The API mimics DynamoDB's HTTP API. You can interact with it by sending requests to the **router** on port `8081`. All requests should be `POST` requests to the root path (`/`) and include the `X-Amz-Target` header to specify the operation.
 
 ### Example: CreateTable
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.CreateTable" 
   -d '{
@@ -75,7 +92,7 @@ curl -X POST
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.PutItem" 
   -d '{
@@ -93,7 +110,7 @@ curl -X POST
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.GetItem" 
   -d '{
@@ -109,7 +126,7 @@ curl -X POST
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.UpdateItem" 
   -d '{
@@ -129,7 +146,7 @@ curl -X POST
 
 ```bash
 curl -X POST \
-  http://localhost:8000/ \
+  http://localhost:8081/ \
   -H "Content-Type: application/x-amz-json-1.0" \
   -H "X-Amz-Target: DynamoDB_20120810.UpdateItem" \
   -d '{
@@ -149,7 +166,7 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  http://localhost:8000/ \
+  http://localhost:8081/ \
   -H "Content-Type: application/x-amz-json-1.0" \
   -H "X-Amz-Target: DynamoDB_20120810.UpdateItem" \
   -d '{
@@ -167,7 +184,7 @@ curl -X POST \
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.Query" 
   -d '{
@@ -180,7 +197,7 @@ curl -X POST
 
 ```bash
 curl -X POST 
-  http://localhost:8000/ 
+  http://localhost:8081/ 
   -H "Content-Type: application/x-amz-json-1.0" 
   -H "X-Amz-Target: DynamoDB_20120810.DeleteItem" 
   -d '{
@@ -200,17 +217,30 @@ zagreb/
 ├───go.mod                # Go module definition
 ├───go.sum                # Go module checksums
 ├───cmd/
-│   └───main.go           # Main application entry point
+│   ├───node/
+│   │   └───main.go       # Entry point for a storage node
+│   └───router/
+│       └───main.go       # Entry point for the router
 └───pkg/
-    ├───expression/       # Handles DynamoDB-like expression parsing and attribute value manipulation
+    ├───api/              # Core API server implementation
+    │   ├───api_test.go
+    │   └───server.go
+    ├───expression/       # Handles DynamoDB-like expression parsing
     │   ├───expression_test.go
     │   └───expression.go
-    ├───storage/          # Storage interface definition
+    ├───nodeapi/          # Client for node-to-node communication
+    │   └───client.go
+    ├───router/           # Router logic for request handling and node management
+    │   ├───router_test.go
+    │   └───router.go
+    ├───routerapi/        # Types for router-node communication
+    │   └───types.go
+    ├───storage/          # Storage interface and implementations
     │   ├───storage.go
-    │   └───bbolt/        # bbolt implementation of the storage interface
+    │   └───bbolt/
     │       ├───bbolt_test.go
     │       └───bbolt.go
-    └───types/            # Defines common data structures for requests, responses, and attribute types
+    └───types/            # Common DynamoDB data structures
         └───types.go
 ```
 
@@ -220,4 +250,4 @@ Contributions are welcome! Please feel free to open issues or pull requests.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. (Note: A `LICENSE` file needs to be added.)
+This project is licensed under the MIT License - see the LICENSE file for details.

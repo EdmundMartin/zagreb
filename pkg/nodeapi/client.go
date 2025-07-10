@@ -82,8 +82,31 @@ func (c *NodeClient) doRequest(action string, reqBody interface{}, respBody inte
 }
 
 // CreateTable sends a CreateTable request to the node.
-func (c *NodeClient) CreateTable(req *types.CreateTableRequest) error {
-	return c.doRequest("CreateTable", req, nil)
+func (c *NodeClient) CreateTable(req *types.CreateTableRequest) (*types.CreateTableResponse, error) {
+	var resp types.CreateTableResponse
+	err := c.doRequest("CreateTable", req, &resp)
+	return &resp, err
+}
+
+// DeleteTable sends a DeleteTable request to the node.
+func (c *NodeClient) DeleteTable(req *types.DeleteTableRequest) (*types.DeleteTableResponse, error) {
+	var resp types.DeleteTableResponse
+	err := c.doRequest("DeleteTable", req, &resp)
+	return &resp, err
+}
+
+// DescribeTable sends a DescribeTable request to the node.
+func (c *NodeClient) DescribeTable(req *types.DescribeTableRequest) (*types.DescribeTableResponse, error) {
+	var resp types.DescribeTableResponse
+	err := c.doRequest("DescribeTable", req, &resp)
+	return &resp, err
+}
+
+// ListTables sends a ListTables request to the node.
+func (c *NodeClient) ListTables(req *types.ListTablesRequest) (*types.ListTablesResponse, error) {
+	var resp types.ListTablesResponse
+	err := c.doRequest("ListTables", req, &resp)
+	return &resp, err
 }
 
 // Put sends a Put request to the node.
