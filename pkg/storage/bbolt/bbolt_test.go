@@ -603,6 +603,7 @@ func TestBBoltStorage_Scan(t *testing.T) {
 		TableName: "scan-test-table",
 		AttributeDefinitions: []*types.AttributeDefinition{
 			{AttributeName: "id", AttributeType: "S"},
+			{AttributeName: "data", AttributeType: "S"},
 		},
 		KeySchema: []*types.KeySchemaElement{
 			{AttributeName: "id", KeyType: "HASH"},
@@ -628,6 +629,14 @@ func TestBBoltStorage_Scan(t *testing.T) {
 			"id":   {S: stringPtr("item3")},
 			"data": {S: stringPtr("data3")},
 		},
+		{
+			"id":   {S: stringPtr("item4")},
+			"data": {S: stringPtr("data4")},
+		},
+		{
+			"id":   {S: stringPtr("item5")},
+			"data": {S: stringPtr("data5")},
+		},
 	}
 
 	for _, item := range itemsToPut {
@@ -640,21 +649,24 @@ func TestBBoltStorage_Scan(t *testing.T) {
 		}
 	}
 
+	// Test full scan (no pagination)
 	scanReq := &types.ScanRequest{
 		TableName: "scan-test-table",
 	}
 
-	scannedItems, err := s.Scan(scanReq)
+	resp, err := s.Scan(scanReq)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assert.Len(t, scannedItems, len(itemsToPut), "Expected same number of scanned items as put items")
+	assert.Len(t, resp.Items, len(itemsToPut), "Expected same number of scanned items as put items")
+	assert.Equal(t, len(itemsToPut), resp.ScannedCount, "Expected ScannedCount to match total items")
+	assert.Nil(t, resp.LastEvaluatedKey, "Expected LastEvaluatedKey to be nil for full scan")
 
 	// Verify that all put items are present in the scanned items
 	foundCount := 0
 	for _, putItem := range itemsToPut {
-		for _, scannedItem := range scannedItems {
+		for _, scannedItem := range resp.Items {
 			if *putItem["id"].S == *scannedItem["id"].S && *putItem["data"].S == *scannedItem["data"].S {
 				foundCount++
 				break
@@ -665,9 +677,44 @@ func TestBBoltStorage_Scan(t *testing.T) {
 
 	// Test scanning a non-existent table
 	scanReq.TableName = "non-existent-table"
-	scannedItems, err = s.Scan(scanReq)
+	resp, err = s.Scan(scanReq)
 	assert.NoError(t, err)
-	assert.Empty(t, scannedItems, "Expected empty slice for non-existent table scan")
+	assert.Empty(t, resp.Items, "Expected empty slice for non-existent table scan")
+	assert.Equal(t, 0, resp.ScannedCount, "Expected ScannedCount to be 0 for non-existent table scan")
+	assert.Nil(t, resp.LastEvaluatedKey, "Expected LastEvaluatedKey to be nil for non-existent table scan")
+
+	// Test paginated scan
+	scanReq.TableName = "scan-test-table"
+	limit := 2
+	scanReq.Limit = &limit
+	scanReq.ExclusiveStartKey = nil // Start from beginning
+
+	var allScannedItems []map[string]*expression.AttributeValue
+	for {
+		resp, err := s.Scan(scanReq)
+		require.NoError(t, err)
+
+		allScannedItems = append(allScannedItems, resp.Items...)
+
+		if resp.LastEvaluatedKey == nil {
+			break
+		}
+		scanReq.ExclusiveStartKey = resp.LastEvaluatedKey
+	}
+
+	assert.Len(t, allScannedItems, len(itemsToPut), "Expected all items after paginated scan")
+
+	// Verify all items are present after pagination
+	foundCount = 0
+	for _, putItem := range itemsToPut {
+		for _, scannedItem := range allScannedItems {
+			if *putItem["id"].S == *scannedItem["id"].S && *putItem["data"].S == *scannedItem["data"].S {
+				foundCount++
+				break
+			}
+		}
+	}
+	assert.Equal(t, len(itemsToPut), foundCount, "Not all put items were found in paginated scan results")
 }
 
 func stringPtr(s string) *string {

@@ -61,9 +61,14 @@ func (m *MockStorage) Query(req *types.QueryRequest) ([]map[string]*expression.A
 	return args.Get(0).([]map[string]*expression.AttributeValue), args.Error(1)
 }
 
-func (m *MockStorage) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+func (m *MockStorage) Scan(req *types.ScanRequest) (*types.ScanResponse, error) {
 	args := m.Called(req)
-	return args.Get(0).([]map[string]*expression.AttributeValue), args.Error(1)
+	return args.Get(0).(*types.ScanResponse), args.Error(1)
+}
+
+func (m *MockStorage) InternalScan(req *types.ScanRequest) (*types.ScanResponse, error) {
+	args := m.Called(req)
+	return args.Get(0).(*types.ScanResponse), args.Error(1)
 }
 
 // MockNodeClientFactory is a function type to mock nodeapi.NewNodeClient
@@ -572,18 +577,25 @@ func TestScan(t *testing.T) {
 	r.AddNode(node2)
 
 	req := &types.ScanRequest{TableName: "test_table"}
-	expectedItems1 := []map[string]*expression.AttributeValue{{"id": {S: stringPtr("1")}, "data": {S: stringPtr("data1")}}}
-	expectedItems2 := []map[string]*expression.AttributeValue{{"id": {S: stringPtr("2")}, "data": {S: stringPtr("data2")}}}
+	expectedResp1 := &types.ScanResponse{
+		Items:        []map[string]*expression.AttributeValue{{"id": {S: stringPtr("1")}, "data": {S: stringPtr("data1")}}},
+		ScannedCount: 1,
+	}
+	expectedResp2 := &types.ScanResponse{
+		Items:        []map[string]*expression.AttributeValue{{"id": {S: stringPtr("2")}, "data": {S: stringPtr("data2")}}},
+		ScannedCount: 1,
+	}
 
 	// Success case
-	mockClient1.On("Scan", req).Return(expectedItems1, nil).Once()
-	mockClient2.On("Scan", req).Return(expectedItems2, nil).Once()
+	mockClient1.On("Scan", req).Return(expectedResp1, nil).Once()
+	mockClient2.On("Scan", req).Return(expectedResp2, nil).Once()
 	
 	resp, err := r.Scan(req)
 	assert.NoError(t, err)
-	assert.Len(t, resp, 2)
-	assert.Contains(t, resp, expectedItems1[0])
-	assert.Contains(t, resp, expectedItems2[0])
+	assert.Len(t, resp.Items, 2)
+	assert.Equal(t, 2, resp.ScannedCount)
+	assert.Contains(t, resp.Items, expectedResp1.Items[0])
+	assert.Contains(t, resp.Items, expectedResp2.Items[0])
 	mockClient1.AssertExpectations(t)
 	mockClient2.AssertExpectations(t)
 
@@ -595,8 +607,8 @@ func TestScan(t *testing.T) {
 	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
 	r.AddNode(node2) // Re-add node to reset mock
 
-	mockClient1.On("Scan", req).Return(expectedItems1, nil).Once()
-	mockClient2.On("Scan", req).Return([]map[string]*expression.AttributeValue{}, errors.New("client 2 error")).Once()
+	mockClient1.On("Scan", req).Return(expectedResp1, nil).Once()
+	mockClient2.On("Scan", req).Return(&types.ScanResponse{}, errors.New("client 2 error")).Once()
 	_, err = r.Scan(req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "client 2 error")

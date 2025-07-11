@@ -121,10 +121,14 @@ type ListTablesResponse struct {
 
 // ScanRequest represents a DynamoDB Scan request.
 type ScanRequest struct {
-	TableName string `json:"TableName"`
+	TableName         string                     `json:"TableName"`
+	Limit             *int                       `json:"Limit,omitempty"`
+	ExclusiveStartKey map[string]*AttributeValue `json:"ExclusiveStartKey,omitempty"`
 }
 
 // ScanResponse represents a DynamoDB Scan response.
 type ScanResponse struct {
-	Items []map[string]*AttributeValue `json:"Items"`
+	Items            []map[string]*AttributeValue `json:"Items"`
+	LastEvaluatedKey map[string]*AttributeValue `json:"LastEvaluatedKey,omitempty"`
+	ScannedCount     int                        `json:"ScannedCount"`
 }

@@ -71,6 +71,18 @@ func (r *Router) RemoveNode(nodeID string) {
 	delete(r.nodeClients, nodeID)
 }
 
+// GetActiveNodes returns a slice of all currently active nodes.
+func (r *Router) GetActiveNodes() []Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	activeNodes := make([]Node, 0, len(r.nodes))
+	for _, node := range r.nodes {
+		activeNodes = append(activeNodes, node)
+	}
+	return activeNodes
+}
+
 // GetNode returns the node responsible for the given key.
 func (r *Router) GetNode(key string) (Node, error) {
 	r.mu.RLock()
@@ -292,7 +304,7 @@ func (r *Router) Query(req *types.QueryRequest) ([]map[string]*expression.Attrib
 }
 
 // Scan routes the Scan request to all nodes and aggregates the results.
-func (r *Router) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+func (r *Router) Scan(req *types.ScanRequest) (*types.ScanResponse, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -301,6 +313,8 @@ func (r *Router) Scan(req *types.ScanRequest) ([]map[string]*expression.Attribut
 	}
 
 	var allItems []map[string]*expression.AttributeValue
+	var totalScannedCount int
+	var lastEvaluatedKey map[string]*expression.AttributeValue // Simplified: last one processed
 	var firstErr error
 
 	for _, node := range r.nodes {
@@ -311,19 +325,74 @@ func (r *Router) Scan(req *types.ScanRequest) ([]map[string]*expression.Attribut
 			}
 			continue
 		}
-		respItems, err := client.Scan(req)
+		resp, err := client.Scan(req)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("failed to scan on node %s: %w", node.ID, err)
 			}
 			continue
 		}
-		allItems = append(allItems, respItems...)
+		allItems = append(allItems, resp.Items...)
+		totalScannedCount += resp.ScannedCount
+		if resp.LastEvaluatedKey != nil {
+			lastEvaluatedKey = resp.LastEvaluatedKey
+		}
 	}
 
 	if firstErr != nil {
 		return nil, firstErr
 	}
 
-	return allItems, nil
+	return &types.ScanResponse{
+		Items:            allItems,
+		LastEvaluatedKey: lastEvaluatedKey,
+		ScannedCount:     totalScannedCount,
+	}, nil
+}
+
+// InternalScan routes the InternalScan request to all nodes and aggregates the results.
+func (r *Router) InternalScan(req *types.ScanRequest) (*types.ScanResponse, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.nodes) == 0 {
+		return nil, fmt.Errorf("no nodes in the ring to perform internal scan")
+	}
+
+	var allItems []map[string]*expression.AttributeValue
+	var totalScannedCount int
+	var lastEvaluatedKey map[string]*expression.AttributeValue // Simplified: last one processed
+	var firstErr error
+
+	for _, node := range r.nodes {
+		client, err := r.getClientForNode(node)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to get client for node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		resp, err := client.InternalScan(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to internal scan on node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		allItems = append(allItems, resp.Items...)
+		totalScannedCount += resp.ScannedCount
+		if resp.LastEvaluatedKey != nil {
+			lastEvaluatedKey = resp.LastEvaluatedKey
+		}
+	}
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return &types.ScanResponse{
+		Items:            allItems,
+		LastEvaluatedKey: lastEvaluatedKey,
+		ScannedCount:     totalScannedCount,
+	}, nil
 }

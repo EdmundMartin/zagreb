@@ -452,6 +452,14 @@ func TestScan(t *testing.T) {
 			"ID":   &awstypes.AttributeValueMemberS{Value: "item3"},
 			"Data": &awstypes.AttributeValueMemberS{Value: "data3"},
 		},
+		{
+			"ID":   &awstypes.AttributeValueMemberS{Value: "item4"},
+			"Data": &awstypes.AttributeValueMemberS{Value: "data4"},
+		},
+		{
+			"ID":   &awstypes.AttributeValueMemberS{Value: "item5"},
+			"Data": &awstypes.AttributeValueMemberS{Value: "data5"},
+		},
 	}
 
 	for _, item := range itemsToPut {
@@ -464,20 +472,58 @@ func TestScan(t *testing.T) {
 		}
 	}
 
-	// Scan the table
+	// Test full scan (no pagination)
 	scanOutput, err := dbClient.Scan(context.TODO(), &dynamodb.ScanInput{
 		TableName: aws.String(tableName),
 	})
 	if err != nil {
-		t.Fatalf("Scan failed: %v", err)
+		t.Fatalf("Full Scan failed: %v", err)
 	}
 
 	if len(scanOutput.Items) != len(itemsToPut) {
-		t.Errorf("expected %d items, got %d", len(itemsToPut), len(scanOutput.Items))
+		t.Errorf("expected %d items for full scan, got %d", len(itemsToPut), len(scanOutput.Items))
+	}
+	if scanOutput.ScannedCount != int32(len(itemsToPut)) {
+		t.Errorf("expected ScannedCount %d, got %d", len(itemsToPut), scanOutput.ScannedCount)
+	}
+	if scanOutput.LastEvaluatedKey != nil {
+		t.Errorf("expected LastEvaluatedKey to be nil for full scan, got %v", scanOutput.LastEvaluatedKey)
 	}
 
+	// Test paginated scan
+	var allScannedItems []map[string]awstypes.AttributeValue
+	var lastEvaluatedKey map[string]awstypes.AttributeValue
+	pageSize := int32(2)
+
+	for i := 0; i < (len(itemsToPut)/int(pageSize))+1; i++ {
+		input := &dynamodb.ScanInput{
+			TableName: aws.String(tableName),
+			Limit:     aws.Int32(pageSize),
+		}
+		if lastEvaluatedKey != nil {
+			input.ExclusiveStartKey = lastEvaluatedKey
+		}
+
+		pageOutput, err := dbClient.Scan(context.TODO(), input)
+		if err != nil {
+			t.Fatalf("Paginated Scan failed on page %d: %v", i+1, err)
+		}
+
+		allScannedItems = append(allScannedItems, pageOutput.Items...)
+		lastEvaluatedKey = pageOutput.LastEvaluatedKey
+
+		if lastEvaluatedKey == nil {
+			break // No more pages
+		}
+	}
+
+	if len(allScannedItems) != len(itemsToPut) {
+		t.Errorf("expected %d items after pagination, got %d", len(itemsToPut), len(allScannedItems))
+	}
+
+	// Verify all items are present after pagination
 	foundItems := make(map[string]bool)
-	for _, item := range scanOutput.Items {
+	for _, item := range allScannedItems {
 		if id, ok := item["ID"]; ok {
 			foundItems[id.(*awstypes.AttributeValueMemberS).Value] = true
 		}
@@ -486,7 +532,7 @@ func TestScan(t *testing.T) {
 	for _, item := range itemsToPut {
 		if id, ok := item["ID"]; ok {
 			if !foundItems[id.(*awstypes.AttributeValueMemberS).Value] {
-				t.Errorf("item with ID %s not found in scan results", id.(*awstypes.AttributeValueMemberS).Value)
+				t.Errorf("item with ID %s not found in paginated scan results", id.(*awstypes.AttributeValueMemberS).Value)
 			}
 		}
 	}

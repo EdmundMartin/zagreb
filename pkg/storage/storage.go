@@ -16,5 +16,6 @@ type Storage interface {
 	Delete(req *types.DeleteRequest) error
 	Update(req *types.UpdateRequest) (map[string]*expression.AttributeValue, error)
 	Query(req *types.QueryRequest) ([]map[string]*expression.AttributeValue, error)
-	Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error)
+	Scan(req *types.ScanRequest) (*types.ScanResponse, error)
+	InternalScan(req *types.ScanRequest) (*types.ScanResponse, error)
 }

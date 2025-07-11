@@ -385,26 +385,61 @@ func (s *BBoltStorage) Query(req *types.QueryRequest) ([]map[string]*expression.
 }
 
 // Scan retrieves all items from a table.
-func (s *BBoltStorage) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
-	var items []map[string]*expression.AttributeValue
+func (s *BBoltStorage) Scan(req *types.ScanRequest) (*types.ScanResponse, error) {
+	items := make([]map[string]*expression.AttributeValue, 0)
+	var lastEvaluatedKey map[string]*expression.AttributeValue
+	scannedCount := 0
 
 	err := s.db.View(func(tx *bolt.Tx) error {
-		// Get the bucket for the table.
 		b := tx.Bucket([]byte(req.TableName))
 		if b == nil {
-			// If the bucket doesn't exist, it means the table is empty or doesn't exist.
-			// DynamoDB Scan returns an empty list if the table is empty.
-			return nil
+			return nil // Table not found, return empty results
 		}
 
 		c := b.Cursor()
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		var k, v []byte
+		if req.ExclusiveStartKey != nil {
+			tableDef, err := s.getTableDef(tx, req.TableName)
+			if err != nil {
+				return err
+			}
+			startKeyStr, err := s.generateKeyString(tableDef, req.ExclusiveStartKey)
+			if err != nil {
+				return err
+			}
+			k, v = c.Seek([]byte(startKeyStr))
+			// If the seeked key is the ExclusiveStartKey itself, move to the next key
+			if k != nil && bytes.Equal(k, []byte(startKeyStr)) {
+				k, v = c.Next()
+			}
+		} else {
+			k, v = c.First()
+		}
+
+		for ; k != nil; k, v = c.Next() {
 			var item map[string]*expression.AttributeValue
 			if err := json.Unmarshal(v, &item); err != nil {
 				return err
 			}
-			items = append(items, item)
+
+			scannedCount++
+			items = append(items, item) // Always add the item first
+
+			// Check if limit is reached after adding the item
+			if req.Limit != nil && len(items) >= *req.Limit {
+				// Limit reached, the last item added is the LastEvaluatedKey
+				tableDef, err := s.getTableDef(tx, req.TableName)
+				if err != nil {
+					return err
+				}
+				primaryKey, err := s.extractPrimaryKey(tableDef, item)
+				if err != nil {
+					return err
+				}
+				lastEvaluatedKey = primaryKey
+				break // Stop scanning
+			}
 		}
 		return nil
 	})
@@ -413,8 +448,29 @@ func (s *BBoltStorage) Scan(req *types.ScanRequest) ([]map[string]*expression.At
 		return nil, err
 	}
 
-	return items, nil
+	return &types.ScanResponse{Items: items, LastEvaluatedKey: lastEvaluatedKey, ScannedCount: scannedCount}, nil
 }
+
+// InternalScan retrieves all items from a table for internal node synchronization.
+func (s *BBoltStorage) InternalScan(req *types.ScanRequest) (*types.ScanResponse, error) {
+	// For bbolt, InternalScan is the same as Scan, as it operates on the local data.
+	return s.Scan(req)
+}
+
+// extractPrimaryKey extracts the primary key attributes from an item.
+func (s *BBoltStorage) extractPrimaryKey(tableDef *types.CreateTableRequest, item map[string]*expression.AttributeValue) (map[string]*expression.AttributeValue, error) {
+	primaryKey := make(map[string]*expression.AttributeValue)
+	for _, ks := range tableDef.KeySchema {
+		attrVal, ok := item[ks.AttributeName]
+		if !ok {
+			return nil, fmt.Errorf("missing key attribute %s in item for primary key extraction", ks.AttributeName)
+		}
+		primaryKey[ks.AttributeName] = attrVal
+	}
+	return primaryKey, nil
+}
+
+// generateKeyString creates a deterministic string key for bbolt.
 
 // generateKeyString creates a deterministic string key for bbolt.
 // It concatenates the hash key and range key (if present) values.
