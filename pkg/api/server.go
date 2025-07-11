@@ -191,6 +191,19 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.QueryResponse{Items: items})
+	case "Scan":
+		var scanReq types.ScanRequest
+		if err := json.Unmarshal(body, &scanReq); err != nil {
+			s.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		items, err := s.storage.Scan(&scanReq)
+		if err != nil {
+			s.writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ScanResponse{Items: items})
 	default:
 		s.writeError(w, "unknown action: "+action, http.StatusBadRequest)
 	}

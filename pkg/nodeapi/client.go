@@ -139,3 +139,10 @@ func (c *NodeClient) Query(req *types.QueryRequest) ([]map[string]*expression.At
 	err := c.doRequest("Query", req, &items)
 	return items, err
 }
+
+// Scan sends a Scan request to the node and returns the items.
+func (c *NodeClient) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+	var resp types.ScanResponse
+	err := c.doRequest("Scan", req, &resp)
+	return resp.Items, err
+}

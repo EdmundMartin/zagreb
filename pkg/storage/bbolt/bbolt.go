@@ -384,6 +384,38 @@ func (s *BBoltStorage) Query(req *types.QueryRequest) ([]map[string]*expression.
 	return items, nil
 }
 
+// Scan retrieves all items from a table.
+func (s *BBoltStorage) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+	var items []map[string]*expression.AttributeValue
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		// Get the bucket for the table.
+		b := tx.Bucket([]byte(req.TableName))
+		if b == nil {
+			// If the bucket doesn't exist, it means the table is empty or doesn't exist.
+			// DynamoDB Scan returns an empty list if the table is empty.
+			return nil
+		}
+
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var item map[string]*expression.AttributeValue
+			if err := json.Unmarshal(v, &item); err != nil {
+				return err
+			}
+			items = append(items, item)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
 // generateKeyString creates a deterministic string key for bbolt.
 // It concatenates the hash key and range key (if present) values.
 func (s *BBoltStorage) generateKeyString(tableDef *types.CreateTableRequest, item map[string]*expression.AttributeValue) (string, error) {

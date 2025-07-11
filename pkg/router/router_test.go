@@ -61,6 +61,11 @@ func (m *MockStorage) Query(req *types.QueryRequest) ([]map[string]*expression.A
 	return args.Get(0).([]map[string]*expression.AttributeValue), args.Error(1)
 }
 
+func (m *MockStorage) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+	args := m.Called(req)
+	return args.Get(0).([]map[string]*expression.AttributeValue), args.Error(1)
+}
+
 // MockNodeClientFactory is a function type to mock nodeapi.NewNodeClient
 type MockNodeClientFactory struct {
 	mock.Mock
@@ -548,4 +553,58 @@ func TestQuery(t *testing.T) {
 
 func stringPtr(s string) *string {
 	return &s
+}
+
+func TestScan(t *testing.T) {
+	mockFactory := new(MockNodeClientFactory)
+	r := NewRouter(mockFactory)
+
+	// Node 1
+	mockClient1 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	node1 := Node{ID: "node1", Addr: "localhost:8001"}
+	r.AddNode(node1)
+
+	// Node 2
+	mockClient2 := new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	node2 := Node{ID: "node2", Addr: "localhost:8002"}
+	r.AddNode(node2)
+
+	req := &types.ScanRequest{TableName: "test_table"}
+	expectedItems1 := []map[string]*expression.AttributeValue{{"id": {S: stringPtr("1")}, "data": {S: stringPtr("data1")}}}
+	expectedItems2 := []map[string]*expression.AttributeValue{{"id": {S: stringPtr("2")}, "data": {S: stringPtr("data2")}}}
+
+	// Success case
+	mockClient1.On("Scan", req).Return(expectedItems1, nil).Once()
+	mockClient2.On("Scan", req).Return(expectedItems2, nil).Once()
+	
+	resp, err := r.Scan(req)
+	assert.NoError(t, err)
+	assert.Len(t, resp, 2)
+	assert.Contains(t, resp, expectedItems1[0])
+	assert.Contains(t, resp, expectedItems2[0])
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+
+	// Error case from one client
+	mockClient1 = new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8001").Return(mockClient1).Once()
+	r.AddNode(node1) // Re-add node to reset mock
+	mockClient2 = new(MockStorage)
+	mockFactory.On("NewNodeClient", "localhost:8002").Return(mockClient2).Once()
+	r.AddNode(node2) // Re-add node to reset mock
+
+	mockClient1.On("Scan", req).Return(expectedItems1, nil).Once()
+	mockClient2.On("Scan", req).Return([]map[string]*expression.AttributeValue{}, errors.New("client 2 error")).Once()
+	_, err = r.Scan(req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client 2 error")
+	mockClient1.AssertExpectations(t)
+	mockClient2.AssertExpectations(t)
+
+	// No nodes in the ring
+	emptyRouter := NewRouter(nil)
+	_, err = emptyRouter.Scan(req)
+	assert.ErrorContains(t, err, "no nodes in the ring to perform scan")
 }

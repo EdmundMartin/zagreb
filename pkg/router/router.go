@@ -290,3 +290,40 @@ func (r *Router) Query(req *types.QueryRequest) ([]map[string]*expression.Attrib
 	}
 	return client.Query(req)
 }
+
+// Scan routes the Scan request to all nodes and aggregates the results.
+func (r *Router) Scan(req *types.ScanRequest) ([]map[string]*expression.AttributeValue, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.nodes) == 0 {
+		return nil, fmt.Errorf("no nodes in the ring to perform scan")
+	}
+
+	var allItems []map[string]*expression.AttributeValue
+	var firstErr error
+
+	for _, node := range r.nodes {
+		client, err := r.getClientForNode(node)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to get client for node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		respItems, err := client.Scan(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to scan on node %s: %w", node.ID, err)
+			}
+			continue
+		}
+		allItems = append(allItems, respItems...)
+	}
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return allItems, nil
+}

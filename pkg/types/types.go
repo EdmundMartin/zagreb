@@ -118,3 +118,13 @@ type ListTablesRequest struct {
 type ListTablesResponse struct {
 	TableNames []string `json:"TableNames"`
 }
+
+// ScanRequest represents a DynamoDB Scan request.
+type ScanRequest struct {
+	TableName string `json:"TableName"`
+}
+
+// ScanResponse represents a DynamoDB Scan response.
+type ScanResponse struct {
+	Items []map[string]*AttributeValue `json:"Items"`
+}

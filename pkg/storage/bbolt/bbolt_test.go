@@ -587,6 +587,89 @@ func TestListTables(t *testing.T) {
 	assert.Contains(t, resp.TableNames, "Table3")
 }
 
+func TestBBoltStorage_Scan(t *testing.T) {
+	f, err := ioutil.TempFile("", "bbolt.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	s, err := bbolt.NewBBoltStorage(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	createReq := &types.CreateTableRequest{
+		TableName: "scan-test-table",
+		AttributeDefinitions: []*types.AttributeDefinition{
+			{AttributeName: "id", AttributeType: "S"},
+		},
+		KeySchema: []*types.KeySchemaElement{
+			{AttributeName: "id", KeyType: "HASH"},
+		},
+	}
+
+	_, err = s.CreateTable(createReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Put some items
+	itemsToPut := []map[string]*expression.AttributeValue{
+		{
+			"id":   {S: stringPtr("item1")},
+			"data": {S: stringPtr("data1")},
+		},
+		{
+			"id":   {S: stringPtr("item2")},
+			"data": {S: stringPtr("data2")},
+		},
+		{
+			"id":   {S: stringPtr("item3")},
+			"data": {S: stringPtr("data3")},
+		},
+	}
+
+	for _, item := range itemsToPut {
+		putReq := &types.PutRequest{
+			TableName: "scan-test-table",
+			Item:      item,
+		}
+		if err := s.Put(putReq); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scanReq := &types.ScanRequest{
+		TableName: "scan-test-table",
+	}
+
+	scannedItems, err := s.Scan(scanReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Len(t, scannedItems, len(itemsToPut), "Expected same number of scanned items as put items")
+
+	// Verify that all put items are present in the scanned items
+	foundCount := 0
+	for _, putItem := range itemsToPut {
+		for _, scannedItem := range scannedItems {
+			if *putItem["id"].S == *scannedItem["id"].S && *putItem["data"].S == *scannedItem["data"].S {
+				foundCount++
+				break
+			}
+		}
+	}
+	assert.Equal(t, len(itemsToPut), foundCount, "Not all put items were found in scan results")
+
+	// Test scanning a non-existent table
+	scanReq.TableName = "non-existent-table"
+	scannedItems, err = s.Scan(scanReq)
+	assert.NoError(t, err)
+	assert.Empty(t, scannedItems, "Expected empty slice for non-existent table scan")
+}
+
 func stringPtr(s string) *string {
 	return &s
 }

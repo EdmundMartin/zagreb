@@ -415,3 +415,79 @@ func TestQuery(t *testing.T) {
 		t.Errorf("expected timestamps 100 and 200, got %v", foundTimestamps)
 	}
 }
+
+func TestScan(t *testing.T) {
+	dbClient, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	tableName := "TestScanTable"
+	_, err := dbClient.CreateTable(context.TODO(), &dynamodb.CreateTableInput{
+		TableName: aws.String(tableName),
+		KeySchema: []awstypes.KeySchemaElement{
+			{AttributeName: aws.String("ID"), KeyType: awstypes.KeyTypeHash},
+		},
+		AttributeDefinitions: []awstypes.AttributeDefinition{
+			{AttributeName: aws.String("ID"), AttributeType: awstypes.ScalarAttributeTypeS},
+		},
+		ProvisionedThroughput: &awstypes.ProvisionedThroughput{
+			ReadCapacityUnits:  aws.Int64(1),
+			WriteCapacityUnits: aws.Int64(1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTable failed: %v", err)
+	}
+
+	// Put multiple items for scanning
+	itemsToPut := []map[string]awstypes.AttributeValue{
+		{
+			"ID":   &awstypes.AttributeValueMemberS{Value: "item1"},
+			"Data": &awstypes.AttributeValueMemberS{Value: "data1"},
+		},
+		{
+			"ID":   &awstypes.AttributeValueMemberS{Value: "item2"},
+			"Data": &awstypes.AttributeValueMemberS{Value: "data2"},
+		},
+		{
+			"ID":   &awstypes.AttributeValueMemberS{Value: "item3"},
+			"Data": &awstypes.AttributeValueMemberS{Value: "data3"},
+		},
+	}
+
+	for _, item := range itemsToPut {
+		_, err := dbClient.PutItem(context.TODO(), &dynamodb.PutItemInput{
+			TableName: aws.String(tableName),
+			Item:      item,
+		})
+		if err != nil {
+			t.Fatalf("PutItem failed: %v", err)
+		}
+	}
+
+	// Scan the table
+	scanOutput, err := dbClient.Scan(context.TODO(), &dynamodb.ScanInput{
+		TableName: aws.String(tableName),
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	if len(scanOutput.Items) != len(itemsToPut) {
+		t.Errorf("expected %d items, got %d", len(itemsToPut), len(scanOutput.Items))
+	}
+
+	foundItems := make(map[string]bool)
+	for _, item := range scanOutput.Items {
+		if id, ok := item["ID"]; ok {
+			foundItems[id.(*awstypes.AttributeValueMemberS).Value] = true
+		}
+	}
+
+	for _, item := range itemsToPut {
+		if id, ok := item["ID"]; ok {
+			if !foundItems[id.(*awstypes.AttributeValueMemberS).Value] {
+				t.Errorf("item with ID %s not found in scan results", id.(*awstypes.AttributeValueMemberS).Value)
+			}
+		}
+	}
+}
