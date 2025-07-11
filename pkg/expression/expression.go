@@ -1,6 +1,7 @@
 package expression
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -107,11 +108,74 @@ func Update(item map[string]*AttributeValue, updateExpression string, expression
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("invalid DELETE clause: %s", clause)
 			}
-			for i := 1; i < len(parts); i++ {
-				attrName := parts[i]
-				// For scalar types, effectively delete by setting to nil
-				// For set types (SS, NS, BS), a more complex parsing of values to delete would be needed.
-				// This simplified implementation only removes the attribute entirely.
+			attrName := parts[1] // Attribute name to delete from or modify
+
+			// Check if it's a scalar delete (e.g., "DELETE MyScalar")
+			if len(parts) == 2 {
+				delete(item, attrName)
+				continue
+			}
+
+			// Assume it's a set delete with a placeholder (e.g., "DELETE MySet :values")
+			if len(parts) < 3 {
+				return nil, fmt.Errorf("invalid DELETE clause for set: %s", clause)
+			}
+			deleteValuePlaceholder := parts[2]
+
+			valuesToDelete, ok := expressionAttributeValues[deleteValuePlaceholder]
+			if !ok {
+				return nil, fmt.Errorf("expression attribute value %s not found for DELETE operation", deleteValuePlaceholder)
+			}
+
+			existingAttr, exists := item[attrName]
+			if !exists {
+				// If attribute doesn't exist, nothing to delete from, so it's a no-op.
+				continue
+			}
+
+			// Handle set types
+			switch {
+			case existingAttr.SS != nil && valuesToDelete.SS != nil:
+				newSet := make([]string, 0)
+				toRemoveMap := make(map[string]bool)
+				for _, val := range valuesToDelete.SS {
+					toRemoveMap[val] = true
+				}
+				for _, val := range existingAttr.SS {
+					if !toRemoveMap[val] {
+						newSet = append(newSet, val)
+					}
+				}
+				item[attrName] = &AttributeValue{SS: newSet}
+			case existingAttr.NS != nil && valuesToDelete.NS != nil:
+				newSet := make([]string, 0)
+				toRemoveMap := make(map[string]bool)
+				for _, val := range valuesToDelete.NS {
+					toRemoveMap[val] = true
+				}
+				for _, val := range existingAttr.NS {
+					if !toRemoveMap[val] {
+						newSet = append(newSet, val)
+					}
+				}
+				item[attrName] = &AttributeValue{NS: newSet}
+			case existingAttr.BS != nil && valuesToDelete.BS != nil:
+				newSet := make([][]byte, 0)
+				for _, existingVal := range existingAttr.BS {
+					found := false
+					for _, valToRemove := range valuesToDelete.BS {
+						if bytes.Equal(existingVal, valToRemove) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						newSet = append(newSet, existingVal)
+					}
+				}
+				item[attrName] = &AttributeValue{BS: newSet}
+			default:
+				// If it's not a set type, or types don't match, treat as scalar delete (remove entire attribute)
 				delete(item, attrName)
 			}
 		default:
