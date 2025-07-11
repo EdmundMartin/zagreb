@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -14,13 +15,13 @@ import (
 	"zagreb/pkg/storage/bbolt"
 )
 
-const (
-	nodeID     = "node-1"                // Unique ID for this node
-	nodeAddr   = ":8001"                 // Address this node listens on
-	routerAddr = "http://localhost:8081" // Address of the router
+var (
+	nodeID     = flag.String("id", "node-1", "Unique ID for this node")
+	nodeAddr   = flag.String("addr", ":8001", "Address this node listens on")
+	routerAddr = flag.String("router", "http://localhost:8081", "Address of the router")
 )
 
-func registerNode() {
+func registerNode(nodeID, nodeAddr, routerAddr string) {
 	registration := routerapi.RegisterNodeRequest{
 		ID:   nodeID,
 		Addr: nodeAddr,
@@ -42,7 +43,7 @@ func registerNode() {
 	log.Printf("Successfully registered node %s with router", nodeID)
 }
 
-func deregisterNode() {
+func deregisterNode(nodeID, routerAddr string) {
 	deregistration := routerapi.DeregisterNodeRequest{
 		ID: nodeID,
 	}
@@ -74,24 +75,26 @@ func deregisterNode() {
 }
 
 func main() {
+	flag.Parse()
+
 	// Register node with router on startup
-	registerNode()
+	registerNode(*nodeID, *nodeAddr, *routerAddr)
 
 	// Handle graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		deregisterNode()
+		deregisterNode(*nodeID, *routerAddr)
 		os.Exit(0)
 	}()
 
-	dbPath := "./" + nodeID + ".db"
+	dbPath := "./" + *nodeID + ".db"
 	bboltStorage, err := bbolt.NewBBoltStorage(dbPath)
 	if err != nil {
 		log.Fatalf("failed to create bbolt storage: %v", err)
 	}
 
 	server := api.NewServer(bboltStorage)
-	server.Run(nodeAddr)
+	server.Run(*nodeAddr)
 }
