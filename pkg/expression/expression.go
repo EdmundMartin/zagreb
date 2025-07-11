@@ -126,7 +126,7 @@ func Update(item map[string]*AttributeValue, updateExpression string, expression
 // This is a very basic implementation and might not handle all edge cases of DynamoDB expressions.
 func splitUpdateExpression(expression string) []string {
 	var clauses []string
-	currentClause := ""
+	var currentClauseBuilder strings.Builder
 	keywords := map[string]bool{
 		"SET":    true,
 		"REMOVE": true,
@@ -136,19 +136,21 @@ func splitUpdateExpression(expression string) []string {
 
 	parts := strings.Fields(expression)
 	for _, part := range parts {
-		if keywords[strings.ToUpper(part)] && currentClause != "" {
-			clauses = append(clauses, currentClause)
-			currentClause = part
+		if keywords[strings.ToUpper(part)] && currentClauseBuilder.Len() > 0 {
+			clauses = append(clauses, currentClauseBuilder.String())
+			currentClauseBuilder.Reset()
+			currentClauseBuilder.WriteString(part)
 		} else {
-			if currentClause == "" {
-				currentClause = part
+			if currentClauseBuilder.Len() == 0 {
+				currentClauseBuilder.WriteString(part)
 			} else {
-				currentClause += " " + part
+				currentClauseBuilder.WriteString(" ")
+				currentClauseBuilder.WriteString(part)
 			}
 		}
 	}
-	if currentClause != "" {
-		clauses = append(clauses, currentClause)
+	if currentClauseBuilder.Len() > 0 {
+		clauses = append(clauses, currentClauseBuilder.String())
 	}
 	return clauses
 }
